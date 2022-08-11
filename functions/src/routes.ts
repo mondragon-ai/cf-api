@@ -18,20 +18,24 @@ export const HEADERS_ADMIN = {
 // Create URL
 export const URL = "https://shophodgetwins.myshopify.com/admin/api/2022-07/"; 
 
+/**
+ * The routes for the custom click funel MVP route 
+ * @param app Express app sent from rest file 
+ * @param db DB created in firebase file
+ */
 export const routes = (app: express.Router, db: any) => {
 
     app.get("/test", async (req: express.Request, res: express.Response) => {
 
-        const response = await shopifyRequest("graphql.json", "POST", {
-            query: "mutation addTags($id: ID!, $tags: [String!]!) { tagsAdd(id: $id, tags: $tags) { node { id } userErrors { message } } }",
-            variables: {
-              id: `gid://shopify/Customer/6128501227692`,
-              tags: "VIP_MEMBER"
-            }
-        });
-        const {data} = await response.json();
-        console.log("\n\n\n"+data+"\n\n\n")
-        res.status(200).send({m: "SUCCESS", d: data})
+        const response = await shopifyRequest(`customers/search.json?query=email:"luke-skywalker@example.com"&fields=id,email`, "GET");
+        const data = await response.json();
+        if (response.status == 422) {
+          console.log("\n\n\n"+response.status+"\n\n\n")
+          res.status(201).send({m: "SUCCESS", d: data, s: response.status})
+        } else {
+          console.log("\n\n\n"+response.status+"\n\n\n")
+          res.status(response.status).send({m: "SUCCESS", d: data, s: response.status})
+        }
     });
 
 
@@ -459,6 +463,7 @@ export const routes = (app: express.Router, db: any) => {
       .then(json => json);
   
       // Complete Draft Order --> Order
+      // TODO: Turn into cron job with pubsub
       completeOrder(shopify_order.draft_order.id);
   
       res.status(200).json({
