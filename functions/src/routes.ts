@@ -6,7 +6,7 @@ import {createCustomerDoc, getCustomerDoc, updateCustomerDoc} from "./lib/firest
 import { cartToOrder, completeOrder, initialCharge, sendOrder } from "./lib/helper";
 import * as functions from "firebase-functions";
 import { giveGiftCard } from "./lib/giftCard";
-import { shopifyRequest } from "./lib/shopify";
+import { createShopifyCustomer } from "./lib/shopify";
 import fetch from "node-fetch";
 
 // Admin Headers 
@@ -25,18 +25,37 @@ export const URL = "https://shophodgetwins.myshopify.com/admin/api/2022-07/";
  */
 export const routes = (app: express.Router, db: any) => {
 
-    app.get("/test", async (req: express.Request, res: express.Response) => {
+  app.get("/test", async (req: express.Request, res: express.Response) => {
+    // Set Vars 
+    // const {shipping} = req.body;
+    const data = await getCustomerDoc("OYl6tO0GIRYXKYFpJe5w");
+    if (data !== undefined) {
 
-        const response = await shopifyRequest(`customers/search.json?query=email:"luke-skywalker@example.com"&fields=id,email`, "GET");
-        const data = await response.json();
-        if (response.status == 422) {
-          console.log("\n\n\n"+response.status+"\n\n\n")
-          res.status(201).send({m: "SUCCESS", d: data, s: response.status})
+      console.log("34 - Firestore Data -- ", data);
+
+      const response = await createShopifyCustomer(data.shipping, "angel@gobigly.com");
+
+      if (response === undefined) {
+        res.status(500).json({
+          m: "ERROR: Likely Shopify Internal Server",
+          d: response
+        })
+      } else {
+        const result = JSON.parse(JSON.stringify(response))
+        if (result.customers[0]) {
+          res.status(200).json({
+            m: "SUCCESS: Customer Created in Shopify", 
+            d: result.customers[0].id});
         } else {
-          console.log("\n\n\n"+response.status+"\n\n\n")
-          res.status(response.status).send({m: "SUCCESS", d: data, s: response.status})
+          res.status(422).json("ERROR: Not a valid email entered.");
         }
-    });
+      }
+
+    } else {
+      res.status(404).json({m: "ERROR -- Firebase could not locate User"})
+    }
+
+  });
 
 
 /** 
@@ -198,77 +217,54 @@ export const routes = (app: express.Router, db: any) => {
     console.log(product, bump)
     // Get Doc
     await docRef.get().then( async (doc: any) => {
+      // Check if DOCUMENT_UUID exists
       if (doc.exists) {
-        // Check the status of the Shopify Create Customer Call
-        async function checkStatus(r: any) {
-  
-          // If 200 >= x < 300, & return customer ID
-          if (r.ok) { 
-  
-            const data = await r.json();
-            const d = {
-                customers: [{
-                    id: data.customer.id
-                }] 
-            };
-            // Return customer if created
-            return  d
-  
-          } else if ( r.status == 422 ) { 
-            
-            // If email is with an existing user search the email 
-            const response = await fetch(URL + `customers/search.json?query=email:"${d.email}"&fields=id,email`, {
-                method: 'get',
-                headers: HEADERS_ADMIN
-            })
-            .then(res => res.json())
-            .then(jsonData =>  jsonData);
-  
-            // Return the shopify UUID
-            return response
-  
-          } else {
-            // error
-            res.status(400).json({m: "SHOPIFY: Unknonwn. See logs for more info."})
-          }
-        };
-        console.log("Document data:", doc.data());
+        // Get DocumentData
         const d: any = doc.data();
+
         try {
           // Customer Data
-          const customer_data = {
-            customer:{ 
-              first_name: name,
-              last_name:"",
-              email: d.email,
-              phone:"",
-              verified_email:true,
-              addresses:[
-                {
-                  address1:line1,
-                  city: city,
-                  province: state,
-                  phone: "",
-                  zip: zip,
-                  last_name:"",
-                  first_name: name,
-                  country:"US",
-                  country_name:"United States", 
-                  default: true
-                }
-              ]
+          let response = await createShopifyCustomer(shipping, "angel@gobigly.com");
+
+          if (response === undefined) {
+            res.status(500).json({
+              m: "ERROR: Likely Shopify Internal Server",
+              d: response
+            });
+          } else {
+            const result = JSON.parse(JSON.stringify(response));
+            if (result.customers[0]) {
+              // Push new data to Firebase
+              await updateCustomerDoc(FB_UUID, {
+                BUMP_OFFER: b, 
+                line_items:[
+                    {
+                        variant_id: product.variant_id,
+                        quantity: 1,
+                        price: product.price,
+                        title: product.title
+                    }
+                ],
+                SHOPIFY_UUID: result.customers[0].id,
+                shipping: {
+                    address: {
+                        line1: line1,
+                        city:  city,
+                        state:  state,
+                        country:  "US",
+                        zip:  state,
+                    },
+                    name:  name
+                },
+                isReadyToCharge: true
+              });
+              res.status(200).json({
+                m: "SUCCESS: Customer Created in Shopify", 
+                d: result.customers[0].id});
+            } else {
+              res.status(422).json("ERROR: Not a valid email entered.");
             }
-          };
-      
-          // Create New Customer OR search for existing on 422 status 
-          const shopifyCustomer = await fetch(URL + `customers.json`, {
-            method: 'POST',
-            body: JSON.stringify(customer_data),
-            headers: HEADERS_ADMIN
-          })
-          .then(resp => checkStatus(resp))
-          .then(json => json);
-          functions.logger.log("\n\n\n\n#3 Update Customer - Shopify: ", shopifyCustomer);
+          }
       
           // Update Stripe Customer 
           const stripeCustomer = await stripe.customers.update(
@@ -296,31 +292,6 @@ export const routes = (app: express.Router, db: any) => {
             }
           );
           functions.logger.log("\n\n\n\n#3 Update Customer - Stripe: ", stripeCustomer);
-      
-          // Push new data to Firebase
-          await updateCustomerDoc(FB_UUID, {
-            BUMP_OFFER: b, 
-            line_items:[
-                {
-                    variant_id: product.variant_id,
-                    quantity: 1,
-                    price: product.price,
-                    title: product.title
-                }
-            ],
-            SHOPIFY_UUID: shopifyCustomer.customers[0].id,
-            shipping: {
-                address: {
-                    line1: line1,
-                    city:  city,
-                    state:  state,
-                    country:  "US",
-                    zip:  state,
-                },
-                name:  name
-            },
-            isReadyToCharge: true
-          });
   
           functions.logger.log("============================================================================================================");
           functions.logger.log("                                          ", FB_UUID, product, b, "                                         ");
@@ -330,8 +301,7 @@ export const routes = (app: express.Router, db: any) => {
           initialCharge(FB_UUID, product, b);
       
           res.status(200).json({
-            m:"Successfly executed.",
-            c: shopifyCustomer,
+            m:"Successfly executed."
           });
           
         } catch (error) {
