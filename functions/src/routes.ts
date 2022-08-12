@@ -1,9 +1,9 @@
 // IMPORTS
 // ============================================================================================================
 import * as express from "express";
-import {stripe} from "./lib/stripe";
-import {createCustomerDoc, getCustomerDoc, updateCustomerDoc} from "./lib/firestore";
-import { cartToOrder, completeOrder, initialCharge, sendOrder } from "./lib/helper";
+import {stripe, updateStripeCustomer} from "./lib/stripe";
+import {addAddressAndLineItem, createCustomerDoc, getCustomerDoc, updateCustomerDoc} from "./lib/firestore";
+import { cartToOrder, completeOrder, sendOrder } from "./lib/helper";
 import * as functions from "firebase-functions";
 import { giveGiftCard } from "./lib/giftCard";
 import { createShopifyCustomer } from "./lib/shopify";
@@ -183,13 +183,12 @@ export const routes = (app: express.Router, db: any) => {
     const {FB_UUID, email, name} = req.body;
     functions.logger.log("\n\n\n\n#2 Add EMAIL\n\n\n");
     try {
-      const customerDoc = await updateCustomerDoc(FB_UUID, {
+      await updateCustomerDoc(FB_UUID, {
         email: email,
         name: name,
       });
       res.status(200).json({
         m:"Successfly updated firebase doc.",
-        c: customerDoc,
       });
     } catch (error) {
       res.status(400).json({
@@ -205,16 +204,14 @@ export const routes = (app: express.Router, db: any) => {
    *  @return 400 || 200 || 201
    */
   app.post("/customers/update", async (req: express.Request, res: express.Response) => {
-    functions.logger.log("\n\n\n\n#3 Update Customer\n\n\n");
     // Define vars
     const {shipping, product, bump, FB_UUID} = req.body;
-    var docRef =  db.collection("customers").doc(FB_UUID); //getCustomerDoc(FB_UUID);
-    const {address, name} = shipping;
-    // const {variant_id, quantity, price, title} = product;
-    const {line1, city, state, zip} = address;
+    var docRef =  db.collection("customers").doc(FB_UUID); 
     let b = bump ? 399 : 0
   
-    console.log(product, bump)
+    // Console Logs
+    functions.logger.log("\n\n\n\n#3 Update Customer - Start\n\n\n");
+
     // Get Doc
     await docRef.get().then( async (doc: any) => {
       // Check if DOCUMENT_UUID exists
@@ -224,100 +221,72 @@ export const routes = (app: express.Router, db: any) => {
 
         try {
           // Customer Data
-          let response = await createShopifyCustomer(shipping, "angel@gobigly.com");
-
-          if (response === undefined) {
-            res.status(500).json({
-              m: "ERROR: Likely Shopify Internal Server",
-              d: response
-            });
-          } else {
-            const result = JSON.parse(JSON.stringify(response));
-            if (result.customers[0]) {
-              // Push new data to Firebase
-              await updateCustomerDoc(FB_UUID, {
-                BUMP_OFFER: b, 
-                line_items:[
-                    {
-                        variant_id: product.variant_id,
-                        quantity: 1,
-                        price: product.price,
-                        title: product.title
-                    }
-                ],
-                SHOPIFY_UUID: result.customers[0].id,
-                shipping: {
-                    address: {
-                        line1: line1,
-                        city:  city,
-                        state:  state,
-                        country:  "US",
-                        zip:  state,
-                    },
-                    name:  name
-                },
-                isReadyToCharge: true
-              });
-              res.status(200).json({
-                m: "SUCCESS: Customer Created in Shopify", 
-                d: result.customers[0].id});
-            } else {
-              res.status(422).json("ERROR: Not a valid email entered.");
-            }
-          }
+          const shopifyCustomer = await createShopifyCustomer(shipping, d.email);
       
           // Update Stripe Customer 
-          const stripeCustomer = await stripe.customers.update(
-            d.STRIPE_UUID,
-            {
-              email: d.email,
-              name: name,
-              shipping: {
-                name:  name,
-                address: {
-                  line1: line1,
-                  city: city,
-                  state: state,
-                  postal_code: zip,
-                  country: "US"
-                }
-              },
-              address: {
-                city: city,
-                country: "US",
-                line1: line1,
-                postal_code: zip,
-                state: state
-              }
+          if (!d.STRIPE_UUID) {
+            functions.logger.error("ERROR: Customers Stripe ID not present.");
+            res.status(422).json("ERROR: Customers Stripe ID not present.");
+          }
+          const stripCustomer = await updateStripeCustomer(d.email, d.STRIPE_UUID, shipping);
+
+          // Check response & send result
+          if (shopifyCustomer === undefined) {
+            res.status(500).json("ERROR: Likely Shopify Internal Server");
+          } else if (stripCustomer === undefined) {
+            res.status(500).json("ERROR: Likely Stripe Internal Server");
+          } else {
+            const result = JSON.parse(JSON.stringify(shopifyCustomer));
+
+            // if the response is as expected, 
+            if (result.customers[0]) {
+              // Push new data to Firebase
+              await addAddressAndLineItem(
+                FB_UUID,
+                b,
+                product,
+                result.customers[0].id,
+                shipping
+              );
+
+              functions.logger.log("============================================================================================================");
+              functions.logger.log("                                               ", FB_UUID,  "                                               ");
+              functions.logger.log("============================================================================================================");
+          
+              // TODO: Cron Job ???
+              // Call initial charge
+              // initialCharge(FB_UUID, product, b);
+
+              // Send Response back
+              res.status(200).json({
+                m: "SUCCESS: Customer Created in Shopify", 
+                d: result.customers[0].id,
+                s: stripCustomer
+              });
+            } else {
+              functions.logger.error("ERROR: Invalid email entered.");
+              res.status(422).json("ERROR: Invalid email entered.");
             }
-          );
-          functions.logger.log("\n\n\n\n#3 Update Customer - Stripe: ", stripeCustomer);
-  
-          functions.logger.log("============================================================================================================");
-          functions.logger.log("                                          ", FB_UUID, product, b, "                                         ");
-          functions.logger.log("============================================================================================================");
-      
-          // Call initial charge
-          initialCharge(FB_UUID, product, b);
-      
-          res.status(200).json({
-            m:"Successfly executed."
-          });
+          }
           
         } catch (error) {
+          functions.logger.error("ERROR: Likely a stripe issue.");
           res.status(400).json({
-            m:"Error: Likely a stripe issue.",
+            m:"ERROR: Likely a stripe issue.",
             e: error,
           });
         };
       } else {
-          // doc.data() will be undefined in this case
-          console.log("No such document!");
+        functions.logger.error("ERROR: Likely a Firebase Document not found.");
+        res.status(404).json("ERROR: Likely a Firebase Document not found.");
       }
     }).catch((error: any) => {
-        console.log("Error getting document:", error);
+      functions.logger.error("ERROR: Likely a Firebase issue. Check logs.\n",error);
+      res.status(404).json({
+        m: "ERROR: Likely a Firebase issue. Check logs.",
+        e: error
+      });
     });
-  
   });
   
   /** 
@@ -346,7 +315,7 @@ export const routes = (app: express.Router, db: any) => {
         // Make the initial Stripe charge based on product price
         const paymentIntent = await stripe.paymentIntents.create({
           amount: price,
-          currency: 'usd',
+          currency: 'USD',
           customer: data.STRIPE_UUID,
           payment_method: paymentMethods.data[0].id ? paymentMethods.data[0].id : "",
           off_session: true,

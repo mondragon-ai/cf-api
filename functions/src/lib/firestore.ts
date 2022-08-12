@@ -70,10 +70,48 @@ export const updateCustomerDoc = async (FB_UUID: string, data: {}) => {
   // Doc Ref
   var docRef =  db.collection("customers").doc(FB_UUID);
 
-  // Doc Ref
-  await docRef.set(data, { merge: true })
-  console.log("updated customer", docRef);
+  try {
+    // Doc Ref
+    await docRef.set(data, { merge: true })
+    return FB_UUID;
+  } catch (err) {
+    return undefined
+  }
 
-  return FB_UUID;
+};
+
+export const addAddressAndLineItem = async (
+  FB_UUID: string, 
+  b: number, 
+  product: any, 
+  shopifyID: string, 
+  shipping: any
+) => {
+  const {address, name} = shipping;
+  const {line1, city, state, zip} = address;
+  await updateCustomerDoc(FB_UUID, {
+    BUMP_OFFER: b, 
+    line_items:[
+      {
+        variant_id: product.variant_id,
+        quantity: 1,
+        price: product.price,
+        title: product.title
+      }
+    ],
+    SHOPIFY_UUID: shopifyID,
+    shipping: {
+      address: {
+        line1: line1,
+        city:  city,
+        state:  state,
+        country:  "US",
+        zip:  zip,
+      },
+      name:  name
+    },
+    isReadyToCharge: true
+  });
+  return undefined;
 };
 
