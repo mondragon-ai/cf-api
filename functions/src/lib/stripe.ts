@@ -81,5 +81,25 @@ export const createSubscription = async (STRIPE_UUID: string, STRIPE_PM: string)
   }
 };
 
-export const createStripeCustomer = async () => {};
+export const createStripeCustomer = async () => {
+    try {
+      const stripeCustomer = await stripe.customers.create({
+        description: "CUSTOM CLICK FUNNEL",
+      });
+  
+      // Create a SetUp Intent to get client side secrete key
+      const paymentIntent = await stripe.setupIntents.create({
+        customer: stripeCustomer.id,
+        payment_method_types: ['card']
+      });
+
+      return {
+        stripe_uuid: stripeCustomer.id,
+        stripe_pm: paymentIntent.id,
+        stripe_client_secrete: paymentIntent.client_secret
+    }
+    } catch (e) {
+        return undefined
+    }
+};
 

@@ -1,7 +1,7 @@
 // IMPORTS
 // ============================================================================================================
 import * as express from "express";
-import {createSubscription, stripe, updateStripeCustomer} from "./lib/stripe";
+import {createStripeCustomer, createSubscription, stripe, updateStripeCustomer} from "./lib/stripe";
 import {addAddressAndLineItem, addSubscriptionForStripe, createCustomerDoc, getCustomerDoc, updateCustomerDoc} from "./lib/firestore";
 import { cartToOrder, completeOrder, sendOrder } from "./lib/helper";
 import * as functions from "firebase-functions";
@@ -109,38 +109,31 @@ export const routes = (app: express.Router, db: any) => {
     // Try to call stripe
     try {
       // Create Stripe Customer
-      const stripeCustomer = await stripe.customers.create({
-        description: "CUSTOM CLICK FUNNEL",
-      });
-  
-      // Create a SetUp Intent to get client side secrete key
-      const paymentIntent = await stripe.setupIntents.create({
-        customer: stripeCustomer.id,
-        payment_method_types: ['card']
-      });
+     const result = await createStripeCustomer();
   
       // Create firebase doc
       const FB_UUID = await createCustomerDoc({
-        STRIPE_UUID: stripeCustomer.id,
-        STRIPE_PI_UID: paymentIntent.id,
-        STRIPE_CLIENT_ID: paymentIntent.client_secret,
-        ORDER_STARTED: false, // TODO: Add more data as needed
-      })
+        STRIPE_UUID: result?.stripe_uuid,
+        STRIPE_PI_UID: result?.stripe_pm,
+        STRIPE_CLIENT_ID: result?.stripe_client_secrete,
+        ORDER_STARTED: false, 
+        // TODO: Add more data as needed && ServerTimeStamp
+      });
 
-      if (FB_UUID === undefined) {
+      if (FB_UUID === undefined || result === undefined) {
         res.status(400).json({
           m:"Error: Could not create a user session. Likely a stripe error. See logs."
         });
-      }
+      };
   
       res.status(200).json({
         m:"Successfly created customer session.",
         FB_UUID: FB_UUID, 
-        clientSecret: paymentIntent.client_secret
+        clientSecret: result?.stripe_client_secrete
       });
   
     } catch (error) {
-      res.status(400).json({
+      res.status(500).json({
         m:"Error: Could not create a user session. Likely a stripe error. See logs.",
         e: error,
       });
@@ -156,15 +149,16 @@ export const routes = (app: express.Router, db: any) => {
         name: name
       }) === undefined) {
         res.status(500).json({
-          m:"Error: Firebase -- Check Logs.",
+          m:"ERROR: Firebase -- Check logs.",
+        });
+      } else {
+        res.status(200).json({
+          m :"SUCCESS: Updated Firebase document.",
         });
       };
-      res.status(200).json({
-        m:"Successfly updated firebase doc.",
-      });
     } catch (error) {
       res.status(400).json({
-        m:"Error: Firebase -- likly missing valid FB_UUID.",
+        m:"ERROR: Firebase -- Likly missing valid FB_UUID.",
         e: error,
       });
     }
@@ -181,7 +175,7 @@ export const routes = (app: express.Router, db: any) => {
     var docRef =  db.collection("customers").doc(FB_UUID); 
     let b = bump ? 399 : 0
   
-    // Console Logs
+    // ? toggle logs
     functions.logger.log("\n\n\n\n#3 Update Customer - Start\n\n\n");
 
     // Get Doc
@@ -189,58 +183,60 @@ export const routes = (app: express.Router, db: any) => {
       // Check if DOCUMENT_UUID exists
       if (doc.exists) {
         // Get DocumentData
-        const d: any = doc.data();
+        const {email, STRIPE_UUID} = await doc.data();
+
+        // If stipe_uuid s not present reject request
+        if (!STRIPE_UUID) {
+          functions.logger.error("ERROR: Customers Stripe ID not present.");
+          res.status(422).json("ERROR: Customers Stripe ID not present.");
+          // TODO: Consider redirection back to rot "/"
+        }
 
         try {
           // Customer Data
-          const shopifyCustomer = await createShopifyCustomer(shipping, d.email);
+          const shopifyCustomer = await createShopifyCustomer(shipping, email);
       
           // Update Stripe Customer 
-          if (!d.STRIPE_UUID) {
-            functions.logger.error("ERROR: Customers Stripe ID not present.");
-            res.status(422).json("ERROR: Customers Stripe ID not present.");
-          }
-          const stripCustomer = await updateStripeCustomer(d.email, d.STRIPE_UUID, shipping);
+          const stripCustomer = await updateStripeCustomer(email, STRIPE_UUID, shipping);
 
           // Check response & send result
           if (shopifyCustomer === undefined) {
-            res.status(500).json("ERROR: Likely Shopify Internal Server");
+            res.status(500).json("ERROR: Likely a Shopify internal server issue.");
           } else if (stripCustomer === undefined) {
-            res.status(500).json("ERROR: Likely Stripe Internal Server");
+            res.status(500).json("ERROR: Likely a Stripe internal server issue.");
           } else {
+            // Parse Stripe update request to JSON
             const result = JSON.parse(JSON.stringify(shopifyCustomer));
 
             // if the response is as expected, 
             if (result.customers[0]) {
               // Push new data to Firebase
-              await addAddressAndLineItem(
+              if (await addAddressAndLineItem(
                 FB_UUID,
                 b,
                 product,
                 result.customers[0].id,
                 shipping
-              );
-
-              functions.logger.log("============================================================================================================");
-              functions.logger.log("                                               ", FB_UUID,  "                                               ");
-              functions.logger.log("============================================================================================================");
+              ) === undefined) {
+                res.status(500).json("ERROR: Likely a Firebase internal server issue.");
+              } else {
+                // TODO: Cron Job ???
+                // Call initial charge
+                // initialCharge(FB_UUID, product, b);
+  
+                // Send Response back
+                res.status(200).json({
+                  m: "SUCCESS: Customer Created in Shopify", 
+                  d: result.customers[0].id,
+                  s: stripCustomer
+                });
+              };
           
-              // TODO: Cron Job ???
-              // Call initial charge
-              // initialCharge(FB_UUID, product, b);
-
-              // Send Response back
-              res.status(200).json({
-                m: "SUCCESS: Customer Created in Shopify", 
-                d: result.customers[0].id,
-                s: stripCustomer
-              });
             } else {
               functions.logger.error("ERROR: Invalid email entered.");
               res.status(422).json("ERROR: Invalid email entered.");
             }
           }
-          
         } catch (error) {
           functions.logger.error("ERROR: Likely a stripe issue.");
           res.status(400).json({
@@ -254,7 +250,7 @@ export const routes = (app: express.Router, db: any) => {
       }
     }).catch((error: any) => {
       functions.logger.error("ERROR: Likely a Firebase issue. Check logs.\n",error);
-      res.status(404).json({
+      res.status(400).json({
         m: "ERROR: Likely a Firebase issue. Check logs.",
         e: error
       });
@@ -271,9 +267,10 @@ export const routes = (app: express.Router, db: any) => {
     functions.logger.log("\n\n\n\n\n#4 Charge Customer\n\n\n\n\n");
     // get Product and FB_UUID
     const { FB_UUID, product, b } = req.body;
-    console.log("\n\n\n\n ============== SPACE ==============\n\n\n\n ");
-    const data = await getCustomerDoc(FB_UUID);
     const price = product.price + b;
+
+
+    const data = await getCustomerDoc(FB_UUID);
   
     if (data) {
       // Get Customers Payment Methods (from PI)
