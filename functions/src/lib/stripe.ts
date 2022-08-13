@@ -10,7 +10,11 @@ export const stripe = Stripe(process.env.STRIPE_SECRET);
  * @param shipping 
  * @returns 
  */
-export const updateStripeCustomer = async (email: string, stripe_uuid: string, shipping: any) => {
+export const updateStripeCustomer = async (
+  email: string,
+  stripe_uuid: string,
+  shipping: any
+) => {
   // Define vars
   const {address, name} = shipping;
   const {line1, city, state, zip} = address;
@@ -47,6 +51,35 @@ export const updateStripeCustomer = async (email: string, stripe_uuid: string, s
   } catch {
     return undefined
   }
+};
 
-}
+export const createSubscription = async (STRIPE_UUID: string, STRIPE_PM: string) => {
+  try {
+    const subscription = await stripe.subscriptions.create({
+      customer: STRIPE_UUID,
+      items: [
+        {
+          price_data: {
+            currency: "usd",
+            product: "prod_M5BDYb70j19Und",
+            recurring: {
+              interval: "month"
+            },
+            unit_amount: 4000
+          }
+        },
+      ],
+      default_payment_method: STRIPE_PM,
+    });
+
+    if (subscription) {
+      return new Object(subscription); 
+    } else { return undefined }
+
+  } catch (err) {
+    return undefined
+  }
+};
+
+export const createStripeCustomer = async () => {};
 

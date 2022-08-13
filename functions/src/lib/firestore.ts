@@ -43,20 +43,24 @@ export const getCustomerDoc = async (FB_UUID: string) => {
  *  @returns FB_UUID
  */
 export const createCustomerDoc = async (data: {}) => {
-  var FB_UUID = ""
-  // Create Doc with Data
-  await db.collection("customers").add(data)
-  .then((docRef) => {
-    console.log("Document written with ID: ", docRef.id);
-    FB_UUID = docRef.id;
-  })
-  .catch((error) => {
-    console.error("Error adding document: ", error);
-  });
+  try {
+    var FB_UUID = ""
+    
+    // Create Doc with Data
+    await db.collection("customers").add(data)
+    .then((docRef) => {
+      console.log("Document written with ID: ", docRef.id);
+      FB_UUID = docRef.id;
+    })
+    .catch((error) => {
+      console.error("Error adding document: ", error);
+      return undefined
+    });
+    return FB_UUID;
 
-  console.error("FB_UUID WRITTEN: ", FB_UUID);
-
-  return FB_UUID;
+  } catch {
+    return undefined
+  }
 };
 
 /**
@@ -89,7 +93,7 @@ export const addAddressAndLineItem = async (
 ) => {
   const {address, name} = shipping;
   const {line1, city, state, zip} = address;
-  await updateCustomerDoc(FB_UUID, {
+  const result = await updateCustomerDoc(FB_UUID, {
     BUMP_OFFER: b, 
     line_items:[
       {
@@ -112,6 +116,34 @@ export const addAddressAndLineItem = async (
     },
     isReadyToCharge: true
   });
-  return undefined;
+  if (result == undefined) {
+    return undefined;
+  } else {
+    return result
+  }
+};
+
+export const addSubscriptionForStripe = async (
+  FB_UUID: string,
+  line_items: any,
+  subscriptionID: string
+) => {
+  const result = await updateCustomerDoc(FB_UUID, {
+    STRIPE_SUB_ID: subscriptionID,
+    line_items: [
+      ...line_items,
+      {
+        title: "VIP Club",
+        price: 4000,
+        variant_id: 41175576608940,
+        quantity: 1
+      }
+    ]
+  });
+  if (result == undefined) {
+    return undefined;
+  } else {
+    return result
+  }
 };
 
