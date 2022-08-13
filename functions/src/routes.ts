@@ -1,12 +1,12 @@
 // IMPORTS
 // ============================================================================================================
 import * as express from "express";
-import {stripe, updateStripeCustomer} from "./lib/stripe";
-import {addAddressAndLineItem, createCustomerDoc, getCustomerDoc, updateCustomerDoc} from "./lib/firestore";
+import {createSubscription, stripe, updateStripeCustomer} from "./lib/stripe";
+import {addAddressAndLineItem, addSubscriptionForStripe, createCustomerDoc, getCustomerDoc, updateCustomerDoc} from "./lib/firestore";
 import { cartToOrder, completeOrder, sendOrder } from "./lib/helper";
 import * as functions from "firebase-functions";
 import { giveGiftCard } from "./lib/giftCard";
-import { createShopifyCustomer } from "./lib/shopify";
+import { createShopifyCustomer, shopifyRequest } from "./lib/shopify";
 import fetch from "node-fetch";
 
 // Admin Headers 
@@ -28,33 +28,6 @@ export const routes = (app: express.Router, db: any) => {
   app.get("/test", async (req: express.Request, res: express.Response) => {
     // Set Vars 
     // const {shipping} = req.body;
-    const data = await getCustomerDoc("OYl6tO0GIRYXKYFpJe5w");
-    if (data !== undefined) {
-
-      console.log("34 - Firestore Data -- ", data);
-
-      const response = await createShopifyCustomer(data.shipping, "angel@gobigly.com");
-
-      if (response === undefined) {
-        res.status(500).json({
-          m: "ERROR: Likely Shopify Internal Server",
-          d: response
-        })
-      } else {
-        const result = JSON.parse(JSON.stringify(response))
-        if (result.customers[0]) {
-          res.status(200).json({
-            m: "SUCCESS: Customer Created in Shopify", 
-            d: result.customers[0].id});
-        } else {
-          res.status(422).json("ERROR: Not a valid email entered.");
-        }
-      }
-
-    } else {
-      res.status(404).json({m: "ERROR -- Firebase could not locate User"})
-    }
-
   });
 
 
@@ -62,79 +35,68 @@ export const routes = (app: express.Router, db: any) => {
  * Test API Route
  */
  app.post('/customers/create-subscription', async (req: express.Request, res: express.Response) => {
-    functions.logger.log("\n\n\n\n\n#6.b Create Subscription - Optional\n\n\n\n\n");
     //Get doc id
     const {FB_UUID} = req.body;
     const data = await getCustomerDoc(FB_UUID);
-      if (data !== null) {
-        try {
-          //Create Sub with customer
-          const subscription = await stripe.subscriptions.create({
-            customer: data.STRIPE_UUID,
-            items: [
-              {
-                price_data: {
-                  currency: "usd",
-                  product: "prod_M5BDYb70j19Und",
-                  recurring: {
-                    interval: "month"
-                  },
-                  unit_amount: 4000
-                }
-              },
-            ],
-            default_payment_method: data.STRIPE_PM,
-          });
-  
-          // ADD Tags to Shopify
-          await fetch(URL + "/graphql.json", {
-            method: "POST",
-            body: JSON.stringify({
-              query: "mutation addTags($id: ID!, $tags: [String!]!) { tagsAdd(id: $id, tags: $tags) { node { id } userErrors { message } } }",
-              variables: {
-                id: `gid://shopify/Customer/${data.SHOPIFY_UUID}`,
-                tags: "VIP_MEMBER"
-              }
-            }),
-            headers: HEADERS_ADMIN
-          })
-          .then(resp => resp.json())
-          .then(json => json);
-  
-          // Update FB Doc 
-          const customerDoc = await updateCustomerDoc(FB_UUID, {
-            STRIPE_SUB_ID: subscription.id,
-            line_items: [
-                ...data.line_items,
-                {
-                    title: "VIP Club",
-                    price: 4000,
-                    variant_id: 41175576608940,
-                    quantity: 1
-                }
-            ]
-          });
-  
-          await giveGiftCard(data.SHOPIFY_UUID)
-  
-          // Send back 200 + data
-          res.status(200).json({
-            m: "Succesffully created subscription.",
-            d: subscription,
-            c: customerDoc,
-          });
-     
-        } catch (error) {
-          res.status(400).json({
-            m: "Error: Likely an issue with stripe.",
-            e: error,
-          });
+    functions.logger.log("\n\n\n\n\n#6.b Create Subscription - Optional\n\n\n\n\n");
+
+    if (data !== null) {
+      try {
+        //Create Sub with customer
+        const subResponse = await createSubscription(data.STRIPE_UUID, data.STRIPE_PM);
+
+        if (subResponse === undefined) {
+          res.status(400).json("Error: Likely an issue with firebase.");
         }
-      } else {
-        res.status(404).json({
-          m: "Error: Likely an issue with firebase.",
+        
+        // ADD Tags to Shopify
+        const shopifyCustomer = await shopifyRequest("/graphql.json", "POST", {
+          query: "mutation addTags($id: ID!, $tags: [String!]!) { tagsAdd(id: $id, tags: $tags) { node { id } userErrors { message } } }",
+          variables: {
+            id: `gid://shopify/Customer/${data.SHOPIFY_UUID}`,
+            tags: "VIP_MEMBER"
+          }
+        });
+
+        // Check if Shopify Request == OK
+        if (shopifyCustomer.status >= 300) {
+          res.status(shopifyCustomer.status).json("Error: Likely an issue with Shopify.");
+        }
+
+        // Create Sub JSON
+        const subscription = JSON.parse(JSON.stringify(subResponse));
+
+        // Update FB Doc 
+        const customerDoc = await addSubscriptionForStripe(FB_UUID, data.line_items, subscription.id);
+
+        // Check if Sub to Stripe was OK
+        if (customerDoc === undefined) {
+          res.status(400).json("Error: Likely an issue with firebase.");
+        }
+
+        // Send Gift Card w/ Shopify && Handle Error
+        if (await giveGiftCard(data.SHOPIFY_UUID) === undefined) {
+          res.status(400).json("Error: Likely an issue with Shopify.");
+        }
+
+        // Send back 200 + data
+        res.status(200).json({
+          m: "Succesffully created subscription.",
+          d: subscription,
+          c: customerDoc,
+        });
+    
+      } catch (error) {
+        res.status(400).json({
+          m: "Error: Likely an issue with stripe.",
+          e: error,
         });
       }
+    } else {
+      res.status(404).json({
+        m: "Error: Likely an issue with firebase.",
+      });
+    }
   });
   
   /**
@@ -164,6 +126,12 @@ export const routes = (app: express.Router, db: any) => {
         STRIPE_CLIENT_ID: paymentIntent.client_secret,
         ORDER_STARTED: false, // TODO: Add more data as needed
       })
+
+      if (FB_UUID === undefined) {
+        res.status(400).json({
+          m:"Error: Could not create a user session. Likely a stripe error. See logs."
+        });
+      }
   
       res.status(200).json({
         m:"Successfly created customer session.",
@@ -183,10 +151,14 @@ export const routes = (app: express.Router, db: any) => {
     const {FB_UUID, email, name} = req.body;
     functions.logger.log("\n\n\n\n#2 Add EMAIL\n\n\n");
     try {
-      await updateCustomerDoc(FB_UUID, {
+      if (await updateCustomerDoc(FB_UUID, {
         email: email,
-        name: name,
-      });
+        name: name
+      }) === undefined) {
+        res.status(500).json({
+          m:"Error: Firebase -- Check Logs.",
+        });
+      };
       res.status(200).json({
         m:"Successfly updated firebase doc.",
       });
