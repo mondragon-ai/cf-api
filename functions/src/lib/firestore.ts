@@ -9,26 +9,24 @@ console.log(db)
  *  @returns customer || null
  */
 export const getCustomerDoc = async (FB_UUID: string) => {
-  let customer: any = undefined;
 
   if (FB_UUID !== "") {
     // Doc Ref
     var docRef = db.collection("customers").doc(FB_UUID);
     // Get Doc
-    await docRef.get().then((doc) => {;
+    return await docRef.get().then((doc) => {;
       if (doc.exists) {
         console.log("Document data:", doc.data());
-        customer = doc.data();
+        return JSON.parse(JSON.stringify(doc.data()));
       } else {
         // doc.data() will be undefined in this case
         console.log("No such document!");
-        customer = undefined;
+        return undefined;
       }
     }).catch((error) => {
       console.log("Error getting document:", error);
       return undefined;
     });
-    return customer;
 
   } else {
     console.log("FB_UUID EMPTY")
@@ -123,6 +121,14 @@ export const addAddressAndLineItem = async (
   }
 };
 
+/**
+ * Helper Fn - STEP #3 
+ * Update primary database
+ * @param FB_UUID 
+ * @param line_items 
+ * @param subscriptionID 
+ * @returns String || Undefined
+ */
 export const addSubscriptionForStripe = async (
   FB_UUID: string,
   line_items: any,

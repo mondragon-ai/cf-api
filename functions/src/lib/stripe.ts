@@ -1,4 +1,8 @@
 // IMPORTS
+
+import { updateCustomerDoc } from "./firestore";
+import { sendOrder } from "./helper";
+
 // ============================================================================================================
 const Stripe = require("stripe");
 export const stripe = Stripe(process.env.STRIPE_SECRET);
@@ -103,3 +107,64 @@ export const createStripeCustomer = async () => {
     }
 };
 
+/**
+ * Helper Fn - STEP #4 
+ * Get Stripe pm & create pi
+ * Update Customer  
+ * @param data 
+ * @param price 
+ * @param FB_UUID 
+ * @returns 
+ */
+export const handleStripeCharge = async (
+  data: any,
+  price: any,
+  FB_UUID: string,
+) => {
+  // Get Customers Payment Methods (from PI)
+  const paymentMethods = await stripe.paymentMethods.list({
+    customer: data.STRIPE_UUID,
+    type: "card"
+  });
+
+  // Make the initial Stripe charge based on product price
+  await stripe.paymentIntents.create({
+    amount: price,
+    currency: 'USD',
+    customer: data.STRIPE_UUID,
+    payment_method: paymentMethods.data[0].id ? paymentMethods.data[0].id : "",
+    off_session: true,
+    confirm: true,
+    receipt_email: data.email, 
+  });
+
+  // Check if Draft Order was created w/ timer
+  if (data.ORDER_STARTED) {
+    return {
+      status: 200,
+      text: "SUCCESS: Customer charged again.",
+      data: null,
+    };
+  } else {
+    // Update FB document
+    if (await updateCustomerDoc(FB_UUID, {
+      STRIPE_PM: paymentMethods.data[0].id,
+      ORDER_STARTED: true
+    }) === undefined) {
+      return {
+        status: 400,
+        text: "ERROR: Problem wiht firebase. Check Logs - Stripe.js",
+      };
+    } else {
+      // Create Draft Order w/ Timer
+      sendOrder(FB_UUID);
+  
+      return {
+        status: 201,
+        text: "SUCCESS: Customer charged && Draft Order timer started.",
+        data: null,
+      };
+
+    };
+  }
+};
