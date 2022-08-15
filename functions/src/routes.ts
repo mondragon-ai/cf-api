@@ -187,8 +187,6 @@ export const routes = (app: express.Router, db: any) => {
       functions.logger.error("ERROR: Likely due to Stripe. Check logs - routes.js.");
       res.status(400).json("ERROR: Likely due to Stripe. Check logs - routes.js.")
     }
-
-    
   });
   
   /**
@@ -239,7 +237,7 @@ export const routes = (app: express.Router, db: any) => {
         await updateCustomerDoc(FB_UUID, {
           line_items: [
             {
-              title: product.title,
+              title: product.title, 
               price: product.price,
               variant_id: product.variant_id,
               quantity: product.quantity
@@ -265,6 +263,7 @@ export const routes = (app: express.Router, db: any) => {
       await handleCharge(FB_UUID, product.price);
   
       // Once added make the charge
+      // call helper fn instead
       await fetch("https://us-central1-shopify-recharge-352914.cloudfunctions.net/funnelAPI/customers/charge", {
         method: 'post',
         body:    JSON.stringify({

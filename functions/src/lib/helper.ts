@@ -3,7 +3,7 @@ import { HEADERS_ADMIN } from "../routes";
 import * as functions from "firebase-functions";
 import { createStripeCustomer, createSubscription, handleStripeCharge, updateStripeCustomer } from "./stripe";
 import { createShopifyCustomer, shopifyRequest } from "./shopify";
-import { addAddressAndLineItem, addSubscriptionForStripe, createCustomerDoc, getCustomerDoc } from "./firestore";
+import { addAddressAndLineItem, addSubscriptionForStripe, createCustomerDoc, getCustomerDoc, updateCustomerDoc } from "./firestore";
 import { giveGiftCard } from "./giftCard";
 
 /**
@@ -372,4 +372,61 @@ export const handleCharge = async (
       text: "ERROR: Likely due to firebase.",
     };
   };
+};
+
+/**
+ * Helper Fn - STEP 4.a 
+ * Add product to cart (primary DB) 
+ * Handle charge from stripe
+ * @param data 
+ * @param FB_UUID 
+ * @param product 
+ * @returns 
+ */
+export const addProduct = async (data: any, FB_UUID: string, product: any) => {
+
+      // If no line items already exist add
+      if (!data?.line_items) {
+        await updateCustomerDoc(FB_UUID, {
+          line_items: [
+            {
+              title: product.title, 
+              price: product.price,
+              variant_id: product.variant_id,
+              quantity: product.quantity
+            }
+          ]
+        });
+      } else {
+        // Update line_items: [{}]  
+        await updateCustomerDoc(FB_UUID, {
+          line_items: [
+            ...data?.line_items, 
+            {
+              title: product.title,
+              price: product.price,
+              variant_id: product.variant_id,
+              quantity: product.quantity
+            }
+          ]
+        });
+      };
+
+      // Handle Stripe charge based on isOrderCreated
+      const result = await handleCharge(FB_UUID, product.price);
+
+      if (result.data == undefined) {
+        return {
+          status: result.status,
+          text: result.text,
+          data: undefined
+        }
+      } else {
+        return {
+          status: 200,
+          text: "SUCCESS: Product added to cart & Charge was completed.",
+          data: null
+        }
+      }
+  
 };
