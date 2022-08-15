@@ -75,7 +75,7 @@ export const createShopifyCustomer = async (shipping: any, email:string) => {
     const response = await shopifyRequest( `customers.json`, "POST", customer_data);
 
     // ? Log to BE 
-    functions.logger.log("\n\n\n\n#3 Update Customer - Shopify: ");
+    functions.logger.log("\n\n\n\n#3 Update Customer - Shopify.ts ");
 
     // Check if exists && retrun {[customers: {id: customer.id}]}
     const status = await checkStatus(response, email); 
@@ -149,6 +149,8 @@ export const createOrder = async (FB_UUID: string) => {
     // Fetch data with UUID
     const data = await getCustomerDoc(FB_UUID);
   
+    console.log("152: shopify.js - data: \n",data);
+
     // Order Data (SHOPIFY)
     const draft_order_data = {
       draft_order:{
@@ -168,17 +170,20 @@ export const createOrder = async (FB_UUID: string) => {
     
     // setTimeout( async () => {
     // Create Order & Get Price
-    const POST_DATA = JSON.stringify(draft_order_data)
 
-    const shopify_order = await shopifyRequest(`draft_orders.json`, "POST", POST_DATA) 
+    const shopify_order = await shopifyRequest(`draft_orders.json`, "POST", draft_order_data) 
+
+    console.log("195: shopify.js - shopify_order: \n", shopify_order);
 
     if (!shopify_order.ok) {
+      functions.logger.error("176: shopify.ts \n", shopify_order.statusText)
       return {
-        text: "ERROR: Likley Shopify - " + shopify_order.text,
+        text: "ERROR: Likley Shopify - " + shopify_order.statusText,
         status: shopify_order.status,
         data: undefined
       }
     } else {
+      functions.logger.log("183: shopify.ts. Complete Order. \n", )
       // Complete Draft Order --> Order
       // TODO: Turn into cron job with pubsub
       completeOrder(await shopify_order.json());
@@ -189,7 +194,6 @@ export const createOrder = async (FB_UUID: string) => {
         data: undefined
       }
     }
-
 
   } catch {
     return {

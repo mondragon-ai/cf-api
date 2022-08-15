@@ -165,12 +165,12 @@ export const routes = (app: express.Router, db: any) => {
       const charge_result = await handleCharge(FB_UUID, price)
 
       // Retrun to client
-      if (!charge_result.data) {
+      if (!charge_result.data == undefined) {
         functions.logger.error(charge_result.text);
         res.status(charge_result.status).json(charge_result.text);
       } else { 
         res.status(200).json({
-          text: "SUCCESS: Shopify Customer created. Charge successful on Stripe. Primary D Updated graciously.",
+          text: "SUCCESS: Shopify Customer created. Charge successful on Stripe. Primary DB Updated graciously.",
           data: {FB_UUID: FB_UUID}
         });
       }
@@ -219,7 +219,7 @@ export const routes = (app: express.Router, db: any) => {
    *  Create draft order once timer is complete
    *  @param FB_UUID
    */
-  app.post("products/add-product", async (req: express.Request, res: express.Response) => {
+  app.post("/products/add-product", async (req: express.Request, res: express.Response) => {
     functions.logger.log("\n\n\n\n\n#6.a Add Product - Optional\n\n\n\n\n");
     const {FB_UUID, product} = req.body;
     const data = await getCustomerDoc(FB_UUID);
@@ -261,23 +261,25 @@ export const routes = (app: express.Router, db: any) => {
     const data = await getCustomerDoc(FB_UUID);
     functions.logger.log("\n\n\n\n\n#6.b Create Subscription - Optional\n\n\n\n\n");
 
-    if (data !== null) {
+    if (data) {
       try {
         //Create Sub with customer
         const subResponse = await handleSubscription(
           FB_UUID,
-          data?.SHOPIFY_UUID,
-          data?.STRIPE_UUID, 
-          data?.STRIPE_PM,
-          data?.line_items,
+          data.SHOPIFY_UUID,
+          data.STRIPE_UUID, 
+          data.STRIPE_PM,
+          data.line_items,
         );
+
         if (subResponse.status >= 300) {
           functions.logger.error(subResponse.text);
-          // Send back 300+ && data
-          res.status(subResponse.status).json(subResponse.text);
+          // Send back 300+ && data 
+          res.status(subResponse.status).json("279: routes.ts:  " + subResponse.text);
+
         } else {
           // Send back 200 - 300 && data
-          res.status(subResponse.status).json(subResponse.text);
+          res.status(subResponse.status).json("282: routes.ts: \n " + subResponse.text);
         }
     
       } catch (error) {

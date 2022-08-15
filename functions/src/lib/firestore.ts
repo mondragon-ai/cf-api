@@ -1,8 +1,6 @@
 // import * as admin from "firebase-admin";
 import {db} from "../firebase"
 
-console.log(db)
-
 /**
  *  Get Firebase customer doc
  *  @param FB_UUID 
@@ -16,20 +14,15 @@ export const getCustomerDoc = async (FB_UUID: string) => {
     // Get Doc
     return await docRef.get().then((doc) => {;
       if (doc.exists) {
-        console.log("Document data:", doc.data());
         return doc.data();
       } else {
-        // doc.data() will be undefined in this case
-        console.log("No such document!");
         return undefined;
       }
     }).catch((error) => {
-      console.log("Error getting document:", error);
       return undefined;
     });
 
   } else {
-    console.log("FB_UUID EMPTY")
     return undefined;
   }
 
@@ -47,11 +40,9 @@ export const createCustomerDoc = async (data: {}) => {
     // Create Doc with Data
     await db.collection("customers").add(data)
     .then((docRef) => {
-      console.log("Document written with ID: ", docRef.id);
       FB_UUID = docRef.id;
     })
     .catch((error) => {
-      console.error("Error adding document: ", error);
       return undefined
     });
     return FB_UUID;

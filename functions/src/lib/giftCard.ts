@@ -1,5 +1,5 @@
 import fetch from "node-fetch";
-import { HEADERS_ADMIN } from "../routes";
+import { HEADERS_ADMIN } from "./shopify";
 import * as functions from "firebase-functions";
 
 export const giveGiftCard = async (customerID: string) => {

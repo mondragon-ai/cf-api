@@ -1,7 +1,7 @@
 // IMPORTS
-
 import { updateCustomerDoc } from "./firestore";
 import { sendOrder } from "./helper";
+import * as functions from "firebase-functions";
 
 // ============================================================================================================
 const Stripe = require("stripe");
@@ -112,17 +112,23 @@ export const createStripeCustomer = async () => {
  */
 export const handleStripeCharge = async (
   data: any,
-  price: any,
+  price: number,
   FB_UUID: string,
 ) => {
+
+  console.log("PRIMARY_DB", data);
+
+  functions.logger.log("STRIPE CHARGE - handleStripeCharge().");
   // Get Customers Payment Methods (from PI)
   const paymentMethods = await stripe.paymentMethods.list({
     customer: data.STRIPE_UUID,
     type: "card"
   });
 
+  console.log("PAYMENT_METHOD:\n", paymentMethods);
+
   // Make the initial Stripe charge based on product price
-  await stripe.paymentIntents.create({
+  const stripe_pi = await stripe.paymentIntents.create({
     amount: price,
     currency: 'USD',
     customer: data.STRIPE_UUID,
@@ -132,8 +138,11 @@ export const handleStripeCharge = async (
     receipt_email: data.email, 
   });
 
+  console.log("PAYMENT_INTENT:\n", stripe_pi);
+
   // Check if Draft Order was created w/ timer
   if (data.ORDER_STARTED) {
+    functions.logger.log("SUCCESS: Customer charged again. - handleStripeCharge().");
     return {
       status: 200,
       text: "SUCCESS: Customer charged again.",
@@ -145,6 +154,7 @@ export const handleStripeCharge = async (
       STRIPE_PM: paymentMethods.data[0].id,
       ORDER_STARTED: true
     }) === undefined) {
+      functions.logger.error( "ERROR: Problem wiht firebase. Check Logs - Stripe.js");
       return {
         status: 400,
         text: "ERROR: Problem wiht firebase. Check Logs - Stripe.js",
@@ -154,6 +164,7 @@ export const handleStripeCharge = async (
       // Create Draft Order w/ Timer
       sendOrder(FB_UUID);
   
+      functions.logger.log("SUCCESS: Customer charged && Draft Order timer started.");
       return {
         status: 201,
         text: "SUCCESS: Customer charged && Draft Order timer started.",
@@ -172,6 +183,7 @@ export const handleStripeCharge = async (
  * @returns 
  */
 export const createSubscription = async (STRIPE_UUID: string, STRIPE_PM: string) => {
+  console.log(STRIPE_UUID,STRIPE_PM);
   try {
     const subscription = await stripe.subscriptions.create({
       customer: STRIPE_UUID,
