@@ -62,7 +62,7 @@ export const createCustomerDoc = async (data: {}) => {
 };
 
 /**
- *  
+ *  Update Customer document in primary DB
  *  @param FB_UUID 
  *  @param data 
  *  @returns FB_UUID
@@ -82,6 +82,16 @@ export const updateCustomerDoc = async (FB_UUID: string, data: {}) => {
 
 };
 
+/**
+ * Helper Fn - STEP #3 
+ * Add Address to DB 
+ * @param FB_UUID 
+ * @param b 
+ * @param product 
+ * @param shopifyID 
+ * @param shipping 
+ * @returns 
+ */
 export const addAddressAndLineItem = async (
   FB_UUID: string, 
   b: number, 
@@ -122,7 +132,7 @@ export const addAddressAndLineItem = async (
 };
 
 /**
- * Helper Fn - STEP #3 
+ * Helper Fn - STEP #4.b
  * Update primary database
  * @param FB_UUID 
  * @param line_items 

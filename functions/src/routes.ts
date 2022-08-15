@@ -3,23 +3,14 @@
 import * as express from "express";
 import { getCustomerDoc, updateCustomerDoc } from "./lib/firestore";
 import {
+  addProduct,
   handleCharge,
   handleNewSession,
   handleSubscription,
   updateAndCharge 
 } from "./lib/helper";
 import * as functions from "firebase-functions";
-import fetch from "node-fetch";
 import { createOrder } from "./lib/shopify";
-
-// Admin Headers 
-export const HEADERS_ADMIN = {
-    "Content-Type": "application/json",
-    "X-Shopify-Access-Token": process.env.SHOPIFY_ADMIN_ACCESS_TOKEN || "",
-};
-
-// Create URL
-export const URL = "https://shophodgetwins.myshopify.com/admin/api/2022-07/"; 
 
 /**
  * The routes for the custom click funel MVP route 
@@ -201,8 +192,9 @@ export const routes = (app: express.Router, db: any) => {
     const {FB_UUID} = req.body;
     
     try {
+      const result = await createOrder(FB_UUID);
       // Create Order & Return result
-      if ( (await createOrder(FB_UUID)).status < 300) {
+      if ( result.status < 300) {
         res.status(200).json({
           m: "SUCCESS. Draft order created. Order will complete in x-minutes.",
         })
@@ -232,61 +224,29 @@ export const routes = (app: express.Router, db: any) => {
     const {FB_UUID, product} = req.body;
     const data = await getCustomerDoc(FB_UUID);
     try {
-      // If no line items already exist add
-      if (!data?.line_items) {
-        await updateCustomerDoc(FB_UUID, {
-          line_items: [
-            {
-              title: product.title, 
-              price: product.price,
-              variant_id: product.variant_id,
-              quantity: product.quantity
-            }
-          ]
-        });
-      } else {
-        // Update line_items: [{}]  
-        await updateCustomerDoc(FB_UUID, {
-          line_items: [
-            ...data?.line_items, 
-            {
-              title: product.title,
-              price: product.price,
-              variant_id: product.variant_id,
-              quantity: product.quantity
-            }
-          ]
-        });
-      };
 
-      // Handle Stripe charge based on isOrderCreated
-      await handleCharge(FB_UUID, product.price);
-  
-      // Once added make the charge
-      // call helper fn instead
-      await fetch("https://us-central1-shopify-recharge-352914.cloudfunctions.net/funnelAPI/customers/charge", {
-        method: 'post',
-        body:    JSON.stringify({
-            FB_UUID: FB_UUID, 
-            product: product,
-            b: 0
-        }),
-        headers: HEADERS_ADMIN
-      })
-      .then(r => r.json())
-      .then(json => json);
-  
-      res.status(200).json({
-        m: "Sucesffully cadded product to DB. Initiating Charge.",
-        d: product,
-      })
+      // Add product to P-DB && Charge w/ Stripe
+      const result = await addProduct(data,FB_UUID,product);
+
+      // Handle result
+      if (result.data == undefined) {
+        res.status(result.status).json({
+          m: result.text
+        });
+
+      } else {
+        res.status(200).json({
+          m: "SUCCESS: Product added to DB. Charge success.",
+        })
+      }
    
     } catch (error) {
       res.status(400).json({
-        m: "Error: Likely due to shopify.",
+        m: "ERROR: Likely due to primary DB.",
         e: error,
       });
     };
+
   });
 
   

@@ -32,9 +32,10 @@ export const shopifyRequest = async (resource: string, method?: string, data?: a
 };
 
 /**
- * Creates a customer object in shopify and return the customer.id || 
+ * Helper Fn - STEP #3\
+ * Creates a customer object in shopify and return the customer.id || undefined
  * @param shipping 
- * @param doc 
+ * @param email 
  */
 export const createShopifyCustomer = async (shipping: any, email:string) => {
 
@@ -68,6 +69,7 @@ export const createShopifyCustomer = async (shipping: any, email:string) => {
       ]
     }
   };
+
   try {
     // Create New Customer 
     const response = await shopifyRequest( `customers.json`, "POST", customer_data);
@@ -99,8 +101,13 @@ export const createShopifyCustomer = async (shipping: any, email:string) => {
   }
 };
 
-// Check Status of response && 
-// return {customer: [{id: customer.id}]} || undefined
+/**
+ * Helper Fn - createShopifyCustomer()
+ * handle response and fetch existing user or return JSON repsonse of new 
+ * @param r - Response
+ * @param e - email
+ * @returns - {customer: [{id: customer.id}]} || undefined
+ */
 async function checkStatus(r: any, e: string) {
   // If 200 >= x < 300 &&
   // Return {customer: [{id: customer.id}]}

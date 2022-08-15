@@ -1,197 +1,28 @@
 import fetch from "node-fetch"
-import { HEADERS_ADMIN } from "../routes";
 import * as functions from "firebase-functions";
 import { createStripeCustomer, createSubscription, handleStripeCharge, updateStripeCustomer } from "./stripe";
-import { createShopifyCustomer, shopifyRequest } from "./shopify";
+import { createOrder, createShopifyCustomer, shopifyRequest } from "./shopify";
 import { addAddressAndLineItem, addSubscriptionForStripe, createCustomerDoc, getCustomerDoc, updateCustomerDoc } from "./firestore";
 import { giveGiftCard } from "./giftCard";
 
-/**
- *  Create an intial charge to the user from the landing page
- * @param FB_UUID 
- * @param product 
- * @param bump 
- */
-export const initialCharge = (FB_UUID: string, product: any, bump: number) =>  {
-  functions.logger.log("\n\n\n\n\n#3.a Send Order - Helper\n\n\n\n\n");
-  setTimeout(() => {
-    console.log("HELPER FUNCITONS - inside: ", FB_UUID);
-    // Fetch INternally
-    fetch("https://us-central1-shopify-recharge-352914.cloudfunctions.net/funnelAPI/customers/charge", {
-      method: "POST",
-      body: JSON.stringify({
-        FB_UUID: FB_UUID,
-        product: product,
-        b: bump
-      }),
-      headers: {
-        "Content-Type": "application/json",
-      }
-    })
-    .then(resp => resp.json())
-    .then(json => json);
-
-  }, 2000);
+// Admin Headers 
+export const HEADERS_ADMIN = {
+    "Content-Type": "application/json",
+    "X-Shopify-Access-Token": process.env.SHOPIFY_ADMIN_ACCESS_TOKEN || "",
 };
 
-/**
- *  Create Draft Order in 1000*60*5 minutes
- *  @param FB_UUID
- */
-export const sendOrder =  (FB_UUID: string) => {
-  functions.logger.log("\n\n\n\n\n#4.a Send Order - Helper -- Outside Timer\n\n\n\n\n");
-  console.log('36 - Shopify DRAFT_ORDER starts in 1000*60*1 minutes: ', FB_UUID);
-  setTimeout(()=> {
-    functions.logger.log("\n\n\n\n\n#4.a Send Order - Helper -- Inside Timer\n\n\n\n\n");
-    console.log('38 - Shopify DRAFT_ORDER called: ', FB_UUID);
-    const f = FB_UUID;
-    // initiate Order 
-    fetch("https://us-central1-shopify-recharge-352914.cloudfunctions.net/funnelAPI/customers/createOrder", {
-      method: 'post',
-      body:    JSON.stringify({FB_UUID: f}),
-      headers: {
-        "Content-Type": "application/json",
-      }
-    })
-    .then(r => r.json())
-    .then(json => json);
+// URL Host 
+const HOST = "" //"us-central1-shopify-recharge-352914.cloudfunctions.net"
 
-    }, 1000*60*7);
-
-};
-
-
-/**
- *  Complete Draft Order --> Order
- *  @param draftID 
- */
- export const completeOrder = async (o: any) => {
-  functions.logger.log('#7 Shopify DRAFT_ORDER Complete: ', o.draft_order);
-  // Check the status of the Shopify Create Customer Call
-  async function checkStatus(r: any) {
-
-        // If 200 >= x < 300, & return customer ID
-        if (r.ok) { 
-            console.log('392 - Shopify SUCCESS: ', r);
-            return  await r.json()
-        } else { 
-            console.log('398 - Shopify: ', r);            
-            return await r.json();
-        } 
-    };
-
-    // Complete Order
-   const result = await fetch(URL + `draft_orders/${o.draft_order.id}/complete.json`, {
-        method: 'put',
-        headers: HEADERS_ADMIN
-    })
-    .then(r =>  checkStatus(r))
-    .then(json => json);
-
-
-  functions.logger.log('#7 Shopify DRAFT_ORDER Complete: ', result);
-
-  return
-};
-
-/**
- *  Get FB Document and Return Cart
- *  @param FB_DOC 
- *  @returns cart[product] || []
- */
- export const cartToOrder = (FB_DOC: any) => {
-  functions.logger.log("\n\n\n\n\n#5.a Order Created - Helper\n\n\n\n\n");
-  console.log('61 - helpers: ', FB_DOC);
-  // Create vars
-  const { line_items } = FB_DOC
-  const ln = line_items.length
-  var cart: any = []
-
-  if (ln == 0 ) { 
-    // return empty []
-    console.log('477 - Shopify: ', cart);
-    return cart
-  } else {
-    // return cart[product]
-    console.log('480 - Shopify: ', cart);
-    for (var i = 0; i < ln; i++) {
-      cart = [
-        ...cart,
-        {
-          variant_id: line_items[i].variant_id,
-          quantity: line_items[i].quantity
-        }
-      ];
-    }
-    return cart
-  };
-};
-
-/**
- * 
- * @param FB_UUID 
- * @param SHOPIFY_UUID 
- * @param STRIPE_UUID 
- * @param STRIPE_PM 
- * @param line_items 
- * @returns 
- */
-export const handleSubscription = async (
-  FB_UUID: string ,
-  SHOPIFY_UUID: string, 
-  STRIPE_UUID: string, 
-  STRIPE_PM: string, 
-  line_items: any,
-) => {
-  //Create Sub with customer
-  const subResponse = await createSubscription(STRIPE_UUID, STRIPE_PM);
-
-  if (subResponse === undefined) {
-    return {status: 400, text: ""}
-  }
-  
-  // ADD Tags to Shopify
-  const shopifyCustomer = await shopifyRequest("/graphql.json", "POST", {
-    query: "mutation addTags($id: ID!, $tags: [String!]!) { tagsAdd(id: $id, tags: $tags) { node { id } userErrors { message } } }",
-    variables: {
-      id: `gid://shopify/Customer/${SHOPIFY_UUID}`,
-      tags: "VIP_MEMBER"
-    }
-  });
-
-  // Check if Shopify Request == OK
-  if (shopifyCustomer.status >= 300) {
-    return {status: shopifyCustomer.status, text: "Error: Likely an issue with Shopify."}
-  }
-
-  // Create Sub JSON
-  const subscription = JSON.parse(JSON.stringify(subResponse));
-
-  // Update FB Doc 
-  const customerDoc = await addSubscriptionForStripe(FB_UUID, line_items, subscription.id);
-
-  // Check if Sub to Stripe was OK
-  if (customerDoc === undefined) {
-    return {status: 400, text: "ERROR: Likely an issue with Stripe."}
-  }
-
-  const giftCard = await giveGiftCard(SHOPIFY_UUID);
-
-  // Send Gift Card w/ Shopify && Handle Error
-  if (giftCard === undefined) {
-    return {status: 400, text: "ERROR: Likely an issue with Shopify."}
-  }
-
-  return {status: 200, text: undefined}
-
-}
+// Create URL
+export const URL = `https://${HOST}/funnelAPI/`; 
 
 /**
  *  Helper Fn - STEP #1
  *  Create new stripe session && update primary DB
  *  @returns {FB_UUID, CLIENT} && 200 || 400
  */
-export const handleNewSession = async () => {
+ export const handleNewSession = async () => {
   // Create Stripe Customer
   const result = await createStripeCustomer();
 
@@ -222,6 +53,74 @@ export const handleNewSession = async () => {
     }
   }
 };
+
+/**
+ * Helper Fn - STEP #4 
+ * Create an intial charge to the user from the landing page
+ * @param FB_UUID 
+ * @param product 
+ * @param bump 
+ */
+export const initialCharge = (FB_UUID: string, product: any, bump: number) =>  {
+  functions.logger.log("\n\n\n\n\n#3.a Send Order - Helper\n\n\n\n\n");
+  setTimeout(() => {
+    console.log("HELPER FUNCITONS - inside: ", FB_UUID);
+    // Fetch INternally
+    fetch(URL + "customers/charge", {
+      method: "POST",
+      body: JSON.stringify({
+        FB_UUID: FB_UUID,
+        product: product,
+        b: bump
+      }),
+      headers: {
+        "Content-Type": "application/json",
+      }
+    })
+    .then(resp => resp.json())
+    .then(json => json);
+
+  }, 2000);
+};
+
+/**
+ *  STEP #6 
+ *  Create Draft Order in 1000*60*5 minutes
+ *  @param FB_UUID
+ */
+export const sendOrder = async (FB_UUID: string, ) => {
+  // ? Toggle log 
+  functions.logger.log("\n\n\n\n\n#4.a Send Order - Helper -- Outside Timer\n\n\n\n\n");
+  
+  // Wait for x-minutes to 
+  setTimeout( async ()=> {
+    // ? Toggle log 
+    functions.logger.log("\n\n\n\n\n#4.a Send Order - Helper -- Inside Timer\n\n\n\n\n");
+
+    try {
+      // Create Order
+      const result = await createOrder(FB_UUID);
+
+      // Create Order & Return result
+      if ( result.status < 300) {
+        return // SUCCESS
+      } else {
+        functions.logger.error("ERROR: Likely due to shopify.");
+        return 
+        // res.status(400).json({
+        //   m: "ERROR: Likely due to shopify.",
+        // })
+      }
+      
+    } catch (error) {
+      functions.logger.error("ERROR: Likely due to shopify.");
+      return
+    }
+
+    }, 1000*60*7);
+
+};
+
 
 /**
  * Helper Fn - STEP #3 
@@ -385,48 +284,180 @@ export const handleCharge = async (
  */
 export const addProduct = async (data: any, FB_UUID: string, product: any) => {
 
-      // If no line items already exist add
-      if (!data?.line_items) {
-        await updateCustomerDoc(FB_UUID, {
-          line_items: [
-            {
-              title: product.title, 
-              price: product.price,
-              variant_id: product.variant_id,
-              quantity: product.quantity
-            }
-          ]
-        });
-      } else {
-        // Update line_items: [{}]  
-        await updateCustomerDoc(FB_UUID, {
-          line_items: [
-            ...data?.line_items, 
-            {
-              title: product.title,
-              price: product.price,
-              variant_id: product.variant_id,
-              quantity: product.quantity
-            }
-          ]
-        });
-      };
-
-      // Handle Stripe charge based on isOrderCreated
-      const result = await handleCharge(FB_UUID, product.price);
-
-      if (result.data == undefined) {
-        return {
-          status: result.status,
-          text: result.text,
-          data: undefined
+  // If no line items already exist add
+  if (!data?.line_items) {
+    await updateCustomerDoc(FB_UUID, {
+      line_items: [
+        {
+          title: product.title, 
+          price: product.price,
+          variant_id: product.variant_id,
+          quantity: product.quantity
         }
-      } else {
-        return {
-          status: 200,
-          text: "SUCCESS: Product added to cart & Charge was completed.",
-          data: null
+      ]
+    });
+  } else {
+    // Update line_items: [{}]  
+    await updateCustomerDoc(FB_UUID, {
+      line_items: [
+        ...data?.line_items, 
+        {
+          title: product.title,
+          price: product.price,
+          variant_id: product.variant_id,
+          quantity: product.quantity
         }
-      }
+      ]
+    });
+  };
+
+  // Handle Stripe charge based on isOrderCreated
+  const result = await handleCharge(FB_UUID, product.price);
+
+  if (result.data == undefined) {
+    return {
+      status: result.status,
+      text: result.text,
+      data: undefined
+    }
+  } else {
+    return {
+      status: 200,
+      text: "SUCCESS: Product added to cart & Charge was completed.",
+      data: null
+    }
+  }
+
+};
+
+/**
+ * Helper Fn - STEP 4.b
+ * Create the subscription obeject and assign the customer based n the received payment method 
+ * @param FB_UUID 
+ * @param SHOPIFY_UUID 
+ * @param STRIPE_UUID 
+ * @param STRIPE_PM 
+ * @param line_items 
+ * @returns 
+ */
+ export const handleSubscription = async (
+  FB_UUID: string ,
+  SHOPIFY_UUID: string, 
+  STRIPE_UUID: string, 
+  STRIPE_PM: string, 
+  line_items: any,
+) => {
+  //Create Sub with customer
+  const subResponse = await createSubscription(STRIPE_UUID, STRIPE_PM);
+
+  if (subResponse === undefined) {
+    return {status: 400, text: ""}
+  }
   
+  // ADD Tags to Shopify
+  const shopifyCustomer = await shopifyRequest("/graphql.json", "POST", {
+    query: "mutation addTags($id: ID!, $tags: [String!]!) { tagsAdd(id: $id, tags: $tags) { node { id } userErrors { message } } }",
+    variables: {
+      id: `gid://shopify/Customer/${SHOPIFY_UUID}`,
+      tags: "VIP_MEMBER"
+    }
+  });
+
+  // Check if Shopify Request == OK
+  if (shopifyCustomer.status >= 300) {
+    return {status: shopifyCustomer.status, text: "Error: Likely an issue with Shopify."}
+  }
+
+  // Create Sub JSON
+  const subscription = JSON.parse(JSON.stringify(subResponse));
+
+  // Update FB Doc 
+  const customerDoc = await addSubscriptionForStripe(FB_UUID, line_items, subscription.id);
+
+  // Check if Sub to Stripe was OK
+  if (customerDoc === undefined) {
+    return {status: 400, text: "ERROR: Likely an issue with Stripe."}
+  }
+
+  const giftCard = await giveGiftCard(SHOPIFY_UUID);
+
+  // Send Gift Card w/ Shopify && Handle Error
+  if (giftCard === undefined) {
+    return {status: 400, text: "ERROR: Likely an issue with Shopify."}
+  }
+
+  return {status: 200, text: undefined}
+
+}
+
+
+/**
+ *  STEP #7 COMPLETE FUNNEL ORDER
+ *  Draft -> Order status fulfilled
+ *  Complete Draft Order --> Order
+ *  @param o 
+ */
+ export const completeOrder = async (o: any) => {
+  // ? Toggle logs
+  functions.logger.log('#7 Shopify DRAFT_ORDER Complete: ', o.draft_order);
+
+  // Check the status of the Shopify Create Customer Call
+  async function checkStatus(r: any) {
+
+    // If 200 >= x < 300, & return customer ID
+    if (r.ok) { 
+      console.log('392 - Shopify SUCCESS: ', r);
+      return  await r.json()
+    } else { 
+      console.log('398 - Shopify: ', r);            
+      return await r.json();
+    } 
+  };
+
+  // Complete Order
+  const result = await fetch(URL + `draft_orders/${o.draft_order.id}/complete.json`, {
+      method: 'put',
+      headers: HEADERS_ADMIN
+  })
+  .then(r =>  checkStatus(r))
+  .then(json => json);
+
+
+  functions.logger.log('#7 Shopify DRAFT_ORDER Complete: ', result);
+
+  return
+};
+
+/**
+ *  Helper Fn - completeOrder()
+ *  Get primary DB customer document && create a new cart obj to return to complete order
+ *  @param FB_DOC 
+ *  @returns cart[product] || []
+ */
+ export const cartToOrder = (FB_DOC: any) => {
+  functions.logger.log("\n\n\n\n\n#5.a Order Created - Helper\n\n\n\n\n");
+  console.log('61 - helpers: ', FB_DOC);
+  // Create vars
+  const { line_items } = FB_DOC
+  const ln = line_items.length
+  var cart: any = []
+
+  if (ln == 0 ) { 
+    // TODO: Return format
+    functions.logger.log('160 - Helper Fn: ', cart);
+    return cart
+  } else {
+    // TODO: Return format
+    functions.logger.log('167 - Helper Fn: ', cart);
+    for (var i = 0; i < ln; i++) {
+      cart = [
+        ...cart,
+        {
+          variant_id: line_items[i].variant_id,
+          quantity: line_items[i].quantity
+        }
+      ];
+    }
+    return cart
+  };
 };
