@@ -17,7 +17,7 @@ export const getCustomerDoc = async (FB_UUID: string) => {
     return await docRef.get().then((doc) => {;
       if (doc.exists) {
         console.log("Document data:", doc.data());
-        return JSON.parse(JSON.stringify(doc.data()));
+        return doc.data();
       } else {
         // doc.data() will be undefined in this case
         console.log("No such document!");

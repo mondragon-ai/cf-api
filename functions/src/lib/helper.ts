@@ -65,8 +65,8 @@ export const sendOrder =  (FB_UUID: string) => {
  *  Complete Draft Order --> Order
  *  @param draftID 
  */
- export const completeOrder = async (draftID: string) => {
-  functions.logger.log('#7 Shopify DRAFT_ORDER Complete: ', draftID);
+ export const completeOrder = async (o: any) => {
+  functions.logger.log('#7 Shopify DRAFT_ORDER Complete: ', o.draft_order);
   // Check the status of the Shopify Create Customer Call
   async function checkStatus(r: any) {
 
@@ -81,7 +81,7 @@ export const sendOrder =  (FB_UUID: string) => {
     };
 
     // Complete Order
-   const result = await fetch(URL + `draft_orders/${draftID}/complete.json`, {
+   const result = await fetch(URL + `draft_orders/${o.draft_order.id}/complete.json`, {
         method: 'put',
         headers: HEADERS_ADMIN
     })
@@ -90,6 +90,8 @@ export const sendOrder =  (FB_UUID: string) => {
 
 
   functions.logger.log('#7 Shopify DRAFT_ORDER Complete: ', result);
+
+  return
 };
 
 /**

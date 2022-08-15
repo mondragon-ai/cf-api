@@ -1,5 +1,7 @@
 import fetch, { Response } from "node-fetch";
 import * as functions from "firebase-functions";
+import { getCustomerDoc } from "./firestore";
+import { cartToOrder, completeOrder } from "./helper";
 // import { firestore } from "firebase-admin";
 
 // Admin Headers 
@@ -126,4 +128,67 @@ async function checkStatus(r: any, e: string) {
       
     } catch (error) { return undefined; }
   } else { return undefined; }
+};
+
+/**
+ *  Helper Fn - STEP #5
+ * Create Draft Order for Shopify && 
+ * POST Complete in x-minutes
+ * @param FB_UUID 
+ * @returns underfined && 200 || 400 || other
+ */
+export const createOrder = async (FB_UUID: string) => {
+  try {
+    // Fetch data with UUID
+    const data = await getCustomerDoc(FB_UUID);
+  
+    // Order Data (SHOPIFY)
+    const draft_order_data = {
+      draft_order:{
+        line_items: data ? await cartToOrder(data) : null,
+        customer:{
+            id: data?.SHOPIFY_UUID
+        },
+        use_customer_default_address:true,
+        tags: "CUSTOM_CLICK_FUNNEL",
+        shipping_line: {
+          custom: "STANDARD_SHIPPING",
+          price: 5.99,
+          title: "Standard Shipping"
+        }
+      }
+    };
+    
+    // setTimeout( async () => {
+    // Create Order & Get Price
+    const POST_DATA = JSON.stringify(draft_order_data)
+
+    const shopify_order = await shopifyRequest(`draft_orders.json`, "POST", POST_DATA) 
+
+    if (!shopify_order.ok) {
+      return {
+        text: "ERROR: Likley Shopify - " + shopify_order.text,
+        status: shopify_order.status,
+        data: undefined
+      }
+    } else {
+      // Complete Draft Order --> Order
+      // TODO: Turn into cron job with pubsub
+      completeOrder(await shopify_order.json());
+  
+      return {
+        text: "SUCCESS: Shopify craft order created && TTC 15 min. ",
+        status: 200,
+        data: undefined
+      }
+    }
+
+
+  } catch {
+    return {
+      text: "ERROR: Likley issue with shopify. Check Logs - shopify.js",
+      status: 400,
+      data: undefined
+    }
+  }
 };
