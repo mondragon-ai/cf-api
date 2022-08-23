@@ -1,5 +1,6 @@
 import * as express from "express";
 import {routes} from "./routes";
+import * as cors from'cors'
 
 /**
  * Transform the API into something RESTFU. Handle oAuth here. 
@@ -9,9 +10,10 @@ export const rest = (db: FirebaseFirestore.Firestore): any => {
   const bodyParser = require("body-parser");
   const bearerToken = require("express-bearer-token");
   const app = express();
-  const API_PREFIX = "funnelAPI"
+  const API_PREFIX = "platform";
 
-//   // Strip API from req
+
+  // Strip API from req
   app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
     if (req.url.indexOf(`/${API_PREFIX}/`) == 0) {
         req.url =req.url.substring(API_PREFIX.length + 1)
@@ -27,6 +29,8 @@ export const rest = (db: FirebaseFirestore.Firestore): any => {
 
   // Parse posted JSON body 
   app.use(express.json());
+
+  app.use(cors({origin: true}))
 
   routes(app,db)
 
